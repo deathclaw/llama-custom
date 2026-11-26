@@ -1,0 +1,61 @@
+# -----------------------------------------------------------------------------
+# Dependabot configuration - keeps the SHA-pinned GitHub Actions up to date.
+#
+# PLACE THIS FILE AT:   .github/dependabot.yml
+# (in the same repository as the custom-build workflow; commit it to the
+#  default branch so the schedule takes effect)
+#
+# How it works:
+#   Once a week (Monday 01:00 UTC - before the daily 03:00 UTC build check)
+#   Dependabot scans every workflow file in the repo for `uses:` references,
+#   resolves the newest tag of each referenced action, and opens a PR like:
+#       "Bump actions/checkout from d23441a to <new sha>"
+#   The PR swaps the 40-hex SHA and rewrites the "# vX.Y.Z" version comment
+#   next to it. Merge it after a green workflow run (trigger a manual
+#   workflow_dispatch to test). This turns every action update into a
+#   reviewed change - the whole point of pinning - instead of the silent
+#   drift you get with floating tags like @v6 / @master.
+#
+# Scope:
+#   * UPDATES: the official GitHub-owned actions (actions/checkout,
+#     actions/cache + actions/cache/restore + actions/cache/save,
+#     actions/upload-artifact) - the "actions/*" allow-filter below.
+#   * DOES NOT TOUCH: the llama.cpp windows-setup-cuda action. custom-build.yml
+#     runs the copy that ships INSIDE the llama.cpp ref being built
+#     (uses: ./.github/actions/windows-setup-cuda, a local path in that
+#     checkout) - this repo carries no copy of it, so there is nothing to
+#     fall back to or to bump. It is not a remote `uses:` dependency, so
+#     Dependabot never sees it, and it must not be pinned by hand: a release
+#     that needs a new toolkit component ships an action that installs it
+#     (see the workflow header, "Supply-chain hardening").
+#
+# For the full option reference see:
+#   https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+# -----------------------------------------------------------------------------
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    # "/" = scan workflow files at the repo root and under .github/workflows/
+    directory: "/"
+
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "01:00"
+      timezone: "UTC"
+
+    # Only the official GitHub-owned actions (wildcards are supported in
+    # dependency names). The windows-setup-cuda action is not a remote
+    # dependency (./ inside the llama.cpp checkout; no copy lives in this
+    # repo), so it is out of scope by construction (see "Scope" above).
+    allow:
+      - dependency-name: "actions/*"
+
+    labels:
+      - "ci"
+      - "dependencies"
+
+    commit-message:
+      prefix: "ci"
+      include: "scope"
