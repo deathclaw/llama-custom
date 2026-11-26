@@ -125,17 +125,19 @@ name: Custom Build (CUDA + Vulkan, Windows)
 #              and update the version comment next to it.
 #         Special case - the llama.cpp windows-setup-cuda action follows the
 #           ref being built (see above), so there is nothing for you - or
-#           for Dependabot - to bump. The file
-#           .github/actions/windows-setup-cuda/action.yml in THIS repo
-#           (verbatim copy from llama.cpp commit
-#           a691b2345844ce1b430201fc5fd404ce062e05f2, master 2026-11-08) is
-#           only the FALLBACK for refs that predate that action in
-#           llama.cpp (the first build tag shipping it is b5310, so it is
-#           b5309 and older), invoked as $/.github/actions/windows-setup-cuda.
-#           Do not re-vendor it to make a new release build: a release that
-#           needs a new toolkit component ships an action that installs it.
-#           Dependabot cannot and should not touch it (it is a file in this
-#           repo, not a uses: pin; also excluded in dependabot.yml).
+#           for Dependabot - to bump. This workflow needs NO other file from
+#           this repo: it carries no copy of that action. Refs that do not
+#           ship it (upstream first included the action at build tag b5310,
+#           so that is b5309 and older; every stable release tag - v0.9.0,
+#           v1.0.0, v1.1.0 - has it) are refused by "Locate the CUDA toolkit
+#           recipe" with an explanatory error. There is deliberately no
+#           vendored fallback: a frozen copy in this repo is exactly what
+#           caused the 2026-11-26 nvml.h failure, and a release that needs
+#           a new toolkit component always ships an action that installs it.
+#           (The 2026-11-10 delivery still carried
+#           .github/actions/windows-setup-cuda/action.yml as that fallback -
+#           if it ever got committed here, delete that folder; nothing
+#           references it now.)
 #   * Repo prerequisite (Settings -> Actions -> General -> Actions permissions):
 #       If this repository uses "Allow <owner>, and select non-<owner>, actions
 #       and reusable workflows" (instead of "Allow all actions"), the allow
@@ -145,8 +147,7 @@ name: Custom Build (CUDA + Vulkan, Windows)
 #           -> tick "Allow actions created by GitHub" (covers the whole
 #              `actions` and `github` orgs), or add pattern: actions/*
 #         - ./.github/actions/windows-setup-cuda (inside the llama.cpp
-#           checkout) and $/.github/actions/windows-setup-cuda (vendored
-#           fallback) -> need NO allow-list entry: both are LOCAL actions.
+#           checkout) -> needs NO allow-list entry: it is a LOCAL action.
 #           GitHub's docs on that setting: "local actions (./ and $/) and
 #           reusable workflows are allowed" (Managing GitHub Actions settings
 #           for a repository, Actions permissions).
@@ -569,10 +570,11 @@ jobs:
           persist-credentials: false
 
       - name: Locate the CUDA toolkit recipe for this ref
-        # Decides WHICH copy of llama.cpp's windows-setup-cuda action installs
-        # the toolkit, and fingerprints it for the cache key. Rationale in
-        # "Supply-chain hardening" in the header: the recipe comes from the ref
-        # being built, so it always matches the code it has to support.
+        # Fingerprints the copy of llama.cpp's windows-setup-cuda action that
+        # this ref ships and uses it as the installer; refuses refs that
+        # ship none. Rationale in "Supply-chain hardening" in the header:
+        # the recipe comes from the ref being built, so it always matches
+        # the code it has to support.
         id: cuda-recipe
         shell: bash
         run: |
@@ -586,12 +588,10 @@ jobs:
             echo "digest=$digest" >> "$GITHUB_OUTPUT"
             echo "Toolkit recipe: shipped with this ref ($recipe, digest $digest)"
           else
-            # Refs older than b5310 (the first build tag shipping the
-            # action) use the copy vendored in this repo. Its content is
-            # fixed, so the fingerprint is a fixed name instead of a hash.
-            echo "source=vendored" >> "$GITHUB_OUTPUT"
-            echo "digest=vendored-a691b23" >> "$GITHUB_OUTPUT"
-            echo "::warning::This llama.cpp ref ships no $recipe - falling back to the vendored copy in this repo (llama.cpp master 2026-11-08)."
+            # No fallback copy is carried in this repo on purpose: a frozen
+            # copy here is exactly what caused the 2026-11-26 nvml.h failure.
+            echo "::error::This llama.cpp ref ships no $recipe, and this workflow carries no fallback copy of it. Upstream first included the action at build tag b5310; every stable release (v0.9.0, v1.0.0, v1.1.0) ships it. Re-run with a newer ref."
+            exit 1
           fi
           # Does this ref's CUDA backend include a header only the NVML dev
           # package provides? (Yes from v1.1.0 on.) "Verify CUDA toolkit"
@@ -628,15 +628,16 @@ jobs:
           key: cuda-toolkit-v2-${{ needs.resolve-ref.outputs.cuda_version }}-${{ needs.resolve-ref.outputs.arch }}-windows-2022-${{ steps.cuda-recipe.outputs.digest }}
 
       - name: Install Cuda Toolkit (recipe shipped by this llama.cpp ref)
-        if: steps.cache-cuda.outputs.cache-hit != 'true' && steps.cuda-recipe.outputs.source == 'ref'
+        if: steps.cache-cuda.outputs.cache-hit != 'true'
         # LOCAL action out of the checked-out llama.cpp source tree - the copy
         # upstream's own release workflow runs (release.yml:
         # `uses: ./.github/actions/windows-setup-cuda`). A ./ path does NOT
-        # mean "the vendored copy in this repo": GitHub's workflow syntax
-        # docs state that "the ./ path resolves against the runner's
-        # workspace rather than the repository of the running workflow" - and
-        # the job workspace here IS the llama.cpp checkout (cloned into the
-        # default location by the step above).
+        # mean "an action in this repository": GitHub's workflow syntax docs
+        # state that "the ./ path resolves against the runner's workspace
+        # rather than the repository of the running workflow" - and the job
+        # workspace here IS the llama.cpp checkout (cloned into the default
+        # location by the step above). This is the ONLY installer: a ref that
+        # ships no action was already rejected by the locate step above.
         # Not a frozen copy and not a SHA pin on purpose: the installer has to
         # change together with the source (2026-11-26: v1.1.0 added
         # `#include <nvml.h>` plus the cuda_nvml_dev package in this action; a
@@ -644,19 +645,6 @@ jobs:
         # "Cannot open include file: 'nvml.h'"). Full trust discussion in the
         # header ("Supply-chain hardening").
         uses: ./.github/actions/windows-setup-cuda
-        with:
-          cuda_version: ${{ needs.resolve-ref.outputs.cuda_version }}
-          cuda_arch: ${{ needs.resolve-ref.outputs.arch }}
-
-      - name: Install Cuda Toolkit (vendored fallback)
-        if: steps.cache-cuda.outputs.cache-hit != 'true' && steps.cuda-recipe.outputs.source == 'vendored'
-        # Only for refs that predate that action in llama.cpp. $/ is the
-        # self-repository reference (GitHub changelog 2026-07-30): it resolves
-        # to THIS repo at the running commit, not to the llama.cpp workspace.
-        # The vendored file .github/actions/windows-setup-cuda/action.yml must
-        # therefore be committed together with this workflow, folder name
-        # unchanged.
-        uses: $/.github/actions/windows-setup-cuda
         with:
           cuda_version: ${{ needs.resolve-ref.outputs.cuda_version }}
           cuda_arch: ${{ needs.resolve-ref.outputs.arch }}
@@ -700,7 +688,7 @@ jobs:
         # (10 GB per repo) must not fail the build itself.
         if: steps.cache-cuda.outputs.cache-hit != 'true'
         continue-on-error: true
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ needs.resolve-ref.outputs.cuda_version }}'
           key: cuda-toolkit-v2-${{ needs.resolve-ref.outputs.cuda_version }}-${{ needs.resolve-ref.outputs.arch }}-windows-2022-${{ steps.cuda-recipe.outputs.digest }}
