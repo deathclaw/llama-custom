@@ -20,12 +20,14 @@
 #   * UPDATES: the official GitHub-owned actions (actions/checkout,
 #     actions/cache + actions/cache/restore + actions/cache/save,
 #     actions/upload-artifact) - the "actions/*" allow-filter below.
-#   * DOES NOT TOUCH: ggml-org/llama.cpp/.github/actions/windows-setup-cuda.
-#     Upstream moves that action in lockstep with llama.cpp development, so a
-#     new pin only makes sense together with re-checking which cuda_version
-#     values the new commit installs (and possibly bumping the toolkit cache
-#     key). The exact manual bump procedure is documented in the comment
-#     above that step in the workflow file.
+#   * DOES NOT TOUCH: the llama.cpp windows-setup-cuda action. custom-build.yml
+#     runs the copy that ships INSIDE the llama.cpp ref being built
+#     (uses: ./.github/actions/windows-setup-cuda, a local path in that
+#     checkout) - this repo carries no copy of it, so there is nothing to
+#     fall back to or to bump. It is not a remote `uses:` dependency, so
+#     Dependabot never sees it, and it must not be pinned by hand: a release
+#     that needs a new toolkit component ships an action that installs it
+#     (see the workflow header, "Supply-chain hardening").
 #
 # For the full option reference see:
 #   https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
@@ -43,9 +45,10 @@ updates:
       time: "01:00"
       timezone: "UTC"
 
-    # Only the official GitHub-owned actions; the ggml-org/llama.cpp pin in
-    # the workflow stays manual on purpose (see "Scope" above). Wildcards are
-    # supported in dependency names.
+    # Only the official GitHub-owned actions (wildcards are supported in
+    # dependency names). The windows-setup-cuda action is not a remote
+    # dependency (./ inside the llama.cpp checkout; no copy lives in this
+    # repo), so it is out of scope by construction (see "Scope" above).
     allow:
       - dependency-name: "actions/*"
 
